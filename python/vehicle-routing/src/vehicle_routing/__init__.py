@@ -5,7 +5,7 @@ from .rest_api import app
 
 def main():
     config = uvicorn.Config("vehicle_routing:app",
-                            port=8080,
+                            port=808,
                             log_config="logging.conf",
                             use_colors=True)
     server = uvicorn.Server(config)

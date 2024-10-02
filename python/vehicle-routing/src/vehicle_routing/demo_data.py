@@ -1,11 +1,10 @@
 from typing import Generator, TypeVar, Sequence
 from datetime import date, datetime, time, timedelta
 from enum import Enum
-from random import Random
+from random import Random, choice
 from dataclasses import dataclass
 
 from .domain import *
-
 
 FIRST_NAMES = ("Amy", "Beth", "Chad", "Dan", "Elsa", "Flo", "Gus", "Hugo", "Ivy", "Jay")
 LAST_NAMES = ("Cole", "Fox", "Green", "Jones", "King", "Li", "Poe", "Rye", "Smith", "Watt")
@@ -15,6 +14,11 @@ MORNING_WINDOW_END = time(12, 0)
 AFTERNOON_WINDOW_START = time(13, 0)
 AFTERNOON_WINDOW_END = time(18, 0)
 
+# Define the fixed warehouse location
+WAREHOUSE_LOCATION = Location(
+    latitude=47.57900943093803,
+    longitude=5.576702063852337
+)
 
 @dataclass
 class _DemoDataProperties:
@@ -54,42 +58,35 @@ class _DemoDataProperties:
             raise ValueError(f"northEastCorner.getLongitude ({self.north_east_corner.longitude}) must be greater than "
                              f"southWestCorner.getLongitude({self.south_west_corner.longitude}).")
 
-
 class DemoData(Enum):
-    PHILADELPHIA = _DemoDataProperties(0, 55, 6, time(7, 30),
-                                       1, 2, 15, 30,
-                                       Location(latitude=39.7656099067391,
-                                                longitude=-76.83782328143754),
-                                       Location(latitude=40.77636644354855,
-                                                longitude=-74.9300739430771))
-
-    HARTFORT = _DemoDataProperties(1, 50, 6, time(7, 30),
-                                   1, 3, 20, 30,
-                                   Location(latitude=41.48366520850297,
-                                            longitude=-73.15901689943055),
-                                   Location(latitude=41.99512052869307,
-                                            longitude=-72.25114548877427))
-
-    FIRENZE = _DemoDataProperties(2, 77, 6, time(7, 30),
-                                  1, 2, 20, 40,
-                                  Location(latitude=43.751466,
-                                           longitude=11.177210),
-                                  Location(latitude=43.809291,
-                                           longitude=11.290195))
-
+    NEW_LOCATION = _DemoDataProperties(
+        seed=0,
+        visit_count=200,
+        vehicle_count=50,
+        vehicle_start_time=time(7, 30),
+        min_demand=2,
+        max_demand=4,
+        min_vehicle_capacity=10,
+        max_vehicle_capacity=15,
+        south_west_corner=Location(
+            latitude=47.57900943093803 - 0.675,
+            longitude=5.576702063852337 - 0.675
+        ),  # South-West corner
+        north_east_corner=Location(
+            latitude=47.57900943093803 + 0.675,
+            longitude=5.576702063852337 + 0.675
+        )   # North-East corner
+    )
 
 def doubles(random: Random, start: float, end: float) -> Generator[float, None, None]:
     while True:
         yield random.uniform(start, end)
 
-
 def ints(random: Random, start: int, end: int) -> Generator[int, None, None]:
     while True:
         yield random.randrange(start, end)
 
-
 T = TypeVar('T')
-
 
 def values(random: Random, sequence: Sequence[T]) -> Generator[T, None, None]:
     start = 0
@@ -97,59 +94,76 @@ def values(random: Random, sequence: Sequence[T]) -> Generator[T, None, None]:
     while True:
         yield sequence[random.randint(start, end)]
 
-
 def generate_names(random: Random) -> Generator[str, None, None]:
     while True:
         yield f'{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}'
 
-
-def generate_demo_data(demo_data_enum: DemoData) -> VehicleRoutePlan:
+def generate_demo_data(demo_data_enum: DemoData = None) -> VehicleRoutePlan:
     name = "demo"
-    demo_data = demo_data_enum.value
+    if demo_data_enum is None:
+        demo_data = choice(list(DemoData)).value
+    else:
+        demo_data = demo_data_enum.value
     random = Random(demo_data.seed)
-    latitudes = doubles(random, demo_data.south_west_corner.latitude, demo_data.north_east_corner.latitude)
-    longitudes = doubles(random, demo_data.south_west_corner.longitude, demo_data.north_east_corner.longitude)
+
+    # Create a list of all possible latitude and longitude ranges
+    all_lat_lon_ranges = [
+        (data.value.south_west_corner, data.value.north_east_corner)
+        for data in DemoData
+    ]
+
+    def random_location():
+        sw, ne = random.choice(all_lat_lon_ranges)
+        return Location(
+            latitude=random.uniform(sw.latitude, ne.latitude),
+            longitude=random.uniform(sw.longitude, ne.longitude)
+        )
 
     demands = ints(random, demo_data.min_demand, demo_data.max_demand + 1)
     service_durations = values(random, SERVICE_DURATION_MINUTES)
     vehicle_capacities = ints(random, demo_data.min_vehicle_capacity,
                               demo_data.max_vehicle_capacity + 1)
 
-    vehicles = [Vehicle(id=str(i),
-                        capacity=next(vehicle_capacities),
-                        home_location=Location(
-                            latitude=next(latitudes),
-                            longitude=next(longitudes)),
-                        departure_time=datetime.combine(
-                            date.today() + timedelta(days=1), demo_data.vehicle_start_time)
-                        )
-                for i in range(demo_data.vehicle_count)]
+    vehicles = [Vehicle(
+        id=str(i),
+        capacity=next(vehicle_capacities),
+        home_location=WAREHOUSE_LOCATION,  # Fixed warehouse location
+        departure_time=datetime.combine(
+            date.today() + timedelta(days=1), demo_data.vehicle_start_time)
+    ) for i in range(demo_data.vehicle_count)]
 
     names = generate_names(random)
     visits = [
         Visit(
-             id=str(i),
-             name=next(names),
-             location=Location(latitude=next(latitudes), longitude=next(longitudes)),
-             demand=next(demands),
-             min_start_time=datetime.combine(date.today() + timedelta(days=1),
-                                             MORNING_WINDOW_START
-                                             if (morning_window := random.random() > 0.5)
-                                             else AFTERNOON_WINDOW_START),
-             max_end_time=datetime.combine(date.today() + timedelta(days=1),
-                                           MORNING_WINDOW_END
-                                           if morning_window
-                                           else AFTERNOON_WINDOW_END),
-             service_duration=timedelta(minutes=next(service_durations)),
-         ) for i in range(demo_data.visit_count)
+            id=str(i),
+            name=next(names),
+            location=random_location(),
+            demand=next(demands),
+            min_start_time=datetime.combine(
+                date.today() + timedelta(days=1),
+                MORNING_WINDOW_START if (morning_window := random.random() > 0.5) else AFTERNOON_WINDOW_START
+            ),
+            max_end_time=datetime.combine(
+                date.today() + timedelta(days=1),
+                MORNING_WINDOW_END if morning_window else AFTERNOON_WINDOW_END
+            ),
+            service_duration=timedelta(minutes=next(service_durations)),
+        ) for i in range(demo_data.visit_count)
     ]
 
-    return VehicleRoutePlan(name=name,
-                            south_west_corner=demo_data.south_west_corner,
-                            north_east_corner=demo_data.north_east_corner,
-                            vehicles=vehicles,
-                            visits=visits)
-
+    return VehicleRoutePlan(
+        name=name,
+        south_west_corner=min(
+            (data.value.south_west_corner for data in DemoData),
+            key=lambda loc: (loc.latitude, loc.longitude)
+        ),
+        north_east_corner=max(
+            (data.value.north_east_corner for data in DemoData),
+            key=lambda loc: (loc.latitude, loc.longitude)
+        ),
+        vehicles=vehicles,
+        visits=visits
+    )
 
 def tomorrow_at(local_time: time) -> datetime:
     return datetime.combine(date.today(), local_time)
